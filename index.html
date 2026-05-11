@@ -1,0 +1,801 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<title>Tekne Park Etme Simülatörü</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #0a0a1a; color: #e0e0e0; font-family: 'Courier New', monospace; overflow: hidden; }
+  #gameCanvas { display: block; }
+  #ui {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    pointer-events: none;
+  }
+  #controls {
+    position: fixed; bottom: 10px; left: 50%; transform: translateX(-50%);
+    display: flex; gap: 16px; align-items: flex-end;
+    pointer-events: all;
+  }
+  .engine-panel {
+    background: rgba(0,0,0,0.75); border: 1px solid #444; border-radius: 8px;
+    padding: 10px 14px; min-width: 130px; text-align: center;
+  }
+  .engine-panel h3 { font-size: 11px; color: #aaa; margin-bottom: 6px; letter-spacing: 1px; }
+  .throttle-bar {
+    width: 100%; height: 120px; background: #111; border: 1px solid #333;
+    border-radius: 4px; position: relative; margin: 6px 0; cursor: pointer;
+    overflow: hidden;
+  }
+  .throttle-fill {
+    position: absolute; left: 0; right: 0; bottom: 50%;
+    transition: height 0.05s;
+  }
+  .throttle-fill.forward { background: linear-gradient(to top, #00cc44, #004d18); }
+  .throttle-fill.reverse { background: linear-gradient(to bottom, #cc4400, #4d1800); top: 50%; bottom: auto; }
+  .throttle-center { position: absolute; left: 0; right: 0; top: 50%; height: 2px; background: #555; }
+  .throttle-label { font-size: 11px; color: #ccc; }
+  .throttle-value { font-size: 18px; font-weight: bold; color: #fff; }
+  .key-hint { font-size: 9px; color: #666; margin-top: 2px; }
+
+  .bow-panel {
+    background: rgba(0,0,0,0.75); border: 1px solid #444; border-radius: 8px;
+    padding: 10px 14px; min-width: 130px; text-align: center;
+  }
+  .bow-bar {
+    width: 100%; height: 24px; background: #111; border: 1px solid #333;
+    border-radius: 4px; position: relative; margin: 6px 0; overflow: hidden;
+  }
+  .bow-fill {
+    position: absolute; top: 0; bottom: 0; width: 50%;
+    transition: width 0.05s;
+  }
+  .bow-fill.left { background: linear-gradient(to left, #0088cc, #002244); right: 50%; left: auto; }
+  .bow-fill.right { background: linear-gradient(to right, #0088cc, #002244); left: 50%; }
+  .bow-center { position: absolute; top: 0; bottom: 0; left: 50%; width: 2px; background: #555; }
+
+  .rudder-panel {
+    background: rgba(0,0,0,0.75); border: 1px solid #444; border-radius: 8px;
+    padding: 10px 14px; min-width: 130px; text-align: center;
+  }
+  .rudder-display {
+    width: 80px; height: 80px; margin: 6px auto; position: relative;
+  }
+  .rudder-display canvas { display: block; }
+
+  #infoPanel {
+    position: fixed; top: 10px; right: 10px;
+    background: rgba(0,0,0,0.75); border: 1px solid #444; border-radius: 8px;
+    padding: 12px 16px; font-size: 12px; min-width: 200px;
+  }
+  #infoPanel .label { color: #888; }
+  #infoPanel .val { color: #fff; font-weight: bold; }
+  #infoPanel .row { display: flex; justify-content: space-between; margin-bottom: 4px; }
+
+  #envPanel {
+    position: fixed; top: 10px; left: 10px;
+    background: rgba(0,0,0,0.75); border: 1px solid #444; border-radius: 8px;
+    padding: 12px 16px; font-size: 12px; min-width: 180px;
+  }
+  #envPanel .row { display: flex; justify-content: space-between; margin-bottom: 4px; }
+
+  #message {
+    position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    background: rgba(0,0,0,0.9); border: 2px solid #00cc44; border-radius: 12px;
+    padding: 20px 40px; font-size: 22px; font-weight: bold; color: #00cc44;
+    display: none; text-align: center;
+  }
+
+  #keymap {
+    position: fixed; top: 10px; left: 50%; transform: translateX(-50%);
+    background: rgba(0,0,0,0.6); border: 1px solid #333; border-radius: 8px;
+    padding: 6px 14px; font-size: 10px; color: #888; text-align: center;
+  }
+
+  .progress-bar {
+    width: 100%; height: 6px; background: #222; border-radius: 3px; margin-top: 4px;
+  }
+  .progress-fill {
+    height: 100%; border-radius: 3px; transition: width 0.3s;
+  }
+</style>
+</head>
+<body>
+<canvas id="gameCanvas"></canvas>
+<div id="ui">
+  <div id="keymap">
+    Sol Motor: W/S &nbsp;|&nbsp; Sağ Motor: P/L &nbsp;|&nbsp; Dümen: A/D &nbsp;|&nbsp; Bow Thruster: Q/E &nbsp;|&nbsp; R: Yeniden Başla
+  </div>
+
+  <div id="envPanel">
+    <div style="font-size:11px;color:#aaa;margin-bottom:8px;letter-spacing:1px;">ÇEVRE</div>
+    <div class="row"><span class="label">Rüzgar</span><span class="val" id="windVal">—</span></div>
+    <div class="row"><span class="label">Yön</span><span class="val" id="windDir">—</span></div>
+    <div class="row"><span class="label">Akıntı</span><span class="val" id="currentVal">—</span></div>
+    <div class="row"><span class="label">Yön</span><span class="val" id="currentDir">—</span></div>
+    <div style="margin-top:8px;font-size:10px;color:#666;">Görev</div>
+    <div class="progress-bar"><div class="progress-fill" id="scoreBar" style="width:0%;background:#00cc44"></div></div>
+    <div style="font-size:11px;color:#ccc;margin-top:4px;" id="scoreText">İskeleye yanaş</div>
+  </div>
+
+  <div id="infoPanel">
+    <div style="font-size:11px;color:#aaa;margin-bottom:8px;letter-spacing:1px;">GEMİ</div>
+    <div class="row"><span class="label">Hız</span><span class="val" id="speedVal">0.0 kn</span></div>
+    <div class="row"><span class="label">Baş Rot</span><span class="val" id="headingVal">000°</span></div>
+    <div class="row"><span class="label">Sol Motor</span><span class="val" id="portVal">0%</span></div>
+    <div class="row"><span class="label">Sağ Motor</span><span class="val" id="stbdVal">0%</span></div>
+    <div class="row"><span class="label">Bow Thr.</span><span class="val" id="bowVal">0%</span></div>
+    <div class="row"><span class="label">Dümen</span><span class="val" id="rudderVal">0°</span></div>
+  </div>
+
+  <div id="controls">
+    <!-- Sol Motor -->
+    <div class="engine-panel">
+      <h3>SOL MOTOR (W/S)</h3>
+      <div class="throttle-value" id="portDisplay">0%</div>
+      <div class="throttle-bar" id="portBar">
+        <div class="throttle-fill forward" id="portFwd" style="height:0%"></div>
+        <div class="throttle-fill reverse" id="portRev" style="height:0%"></div>
+        <div class="throttle-center"></div>
+      </div>
+      <div class="throttle-label">440 HP</div>
+      <div class="key-hint">W=İleri S=Geri</div>
+    </div>
+
+    <!-- Bow Thruster -->
+    <div class="bow-panel">
+      <h3>BOW THRUSTER (Q/E)</h3>
+      <div class="throttle-value" id="bowDisplay">0%</div>
+      <div class="bow-bar">
+        <div class="bow-fill left" id="bowLeft" style="width:0%"></div>
+        <div class="bow-fill right" id="bowRight" style="width:0%"></div>
+        <div class="bow-center"></div>
+      </div>
+      <div class="throttle-label">← Q &nbsp; E →</div>
+      <div style="margin-top:8px">
+        <h3>DÜMEN (A/D)</h3>
+        <div class="throttle-value" id="rudderDisplay">0°</div>
+        <div class="rudder-display">
+          <canvas id="rudderCanvas" width="80" height="80"></canvas>
+        </div>
+        <div class="key-hint">A=Sol D=Sağ</div>
+      </div>
+    </div>
+
+    <!-- Sağ Motor -->
+    <div class="engine-panel">
+      <h3>SAĞ MOTOR (P/L)</h3>
+      <div class="throttle-value" id="stbdDisplay">0%</div>
+      <div class="throttle-bar" id="stbdBar">
+        <div class="throttle-fill forward" id="stbdFwd" style="height:0%"></div>
+        <div class="throttle-fill reverse" id="stbdRev" style="height:0%"></div>
+        <div class="throttle-center"></div>
+      </div>
+      <div class="throttle-label">440 HP</div>
+      <div class="key-hint">P=İleri L=Geri</div>
+    </div>
+  </div>
+</div>
+<div id="message"></div>
+
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+const rudderCanvas = document.getElementById('rudderCanvas');
+const rCtx = rudderCanvas.getContext('2d');
+
+canvas.width = window.innerWidth;
+canvas.height = window.innerHeight;
+
+// ─── Constants ───────────────────────────────────────────────────────────────
+const PIXELS_PER_METER = 4;
+const BOAT_LENGTH = 50; // pixels
+const BOAT_WIDTH = 14;
+const MAX_ENGINE_THRUST = 440 * 745.7; // watts per engine
+const THROTTLE_STEP = 0.015;
+const BOW_STEP = 0.02;
+const RUDDER_STEP = 1.5; // degrees per frame
+const MAX_RUDDER = 35;
+const BOAT_MASS = 45000; // kg
+const DRAG_LINEAR = 1800;
+const DRAG_ANGULAR = 180000;
+const DRAG_LATERAL = 6000;
+
+// ─── Environment ─────────────────────────────────────────────────────────────
+let wind = { speed: 3 + Math.random() * 5, dir: Math.random() * 360 };
+let current = { speed: 0.3 + Math.random() * 0.8, dir: Math.random() * 360 };
+let windVariation = 0;
+
+// ─── Boat State ──────────────────────────────────────────────────────────────
+let boat = {
+  x: 300, y: 300,
+  vx: 0, vy: 0,
+  heading: 0, // degrees, 0=north=up
+  omega: 0, // angular velocity rad/s
+  portThrottle: 0,   // -1 to 1
+  stbdThrottle: 0,   // -1 to 1
+  bowThrust: 0,      // -1 to 1
+  rudder: 0          // degrees -35 to 35
+};
+
+// ─── Camera ──────────────────────────────────────────────────────────────────
+let cam = { x: 0, y: 0, zoom: 1 };
+
+// ─── Berth (iskelesi) ────────────────────────────────────────────────────────
+const BERTH = {
+  x: canvas.width / 2 + 80,
+  y: canvas.height / 2 - 40,
+  w: 60,
+  h: 20,
+  targetHeading: 90 // tekne yatay yanaşmalı
+};
+
+// ─── Keys ────────────────────────────────────────────────────────────────────
+const keys = {};
+window.addEventListener('keydown', e => { keys[e.code] = true; e.preventDefault(); });
+window.addEventListener('keyup', e => { keys[e.code] = false; });
+
+// ─── Water tiles / grid ──────────────────────────────────────────────────────
+function drawWater() {
+  const W = canvas.width, H = canvas.height;
+  ctx.fillStyle = '#0d3d5c';
+  ctx.fillRect(0, 0, W, H);
+
+  // Grid
+  ctx.strokeStyle = 'rgba(255,255,255,0.04)';
+  ctx.lineWidth = 1;
+  const gSize = 80;
+  for (let x = (cam.x % gSize + gSize) % gSize; x < W; x += gSize) {
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
+  }
+  for (let y = (cam.y % gSize + gSize) % gSize; y < H; y += gSize) {
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+  }
+
+  // Wave shimmer
+  const t = Date.now() / 1000;
+  ctx.strokeStyle = 'rgba(100,200,255,0.07)';
+  for (let i = 0; i < 12; i++) {
+    const wx = (i * 137 + cam.x * 0.1) % W;
+    const wy = (i * 89 + cam.y * 0.1 + Math.sin(t + i) * 20) % H;
+    ctx.beginPath();
+    ctx.moveTo(wx, wy);
+    ctx.lineTo(wx + 40 + Math.sin(t * 0.7 + i) * 20, wy);
+    ctx.stroke();
+  }
+}
+
+function drawDock() {
+  ctx.save();
+  ctx.translate(cam.x, cam.y);
+
+  // İskele zemini
+  ctx.fillStyle = '#8B6914';
+  ctx.fillRect(BERTH.x - 5, BERTH.y - BERTH.h, BERTH.w + 10, BERTH.h + 5);
+
+  // İskele çizgileri
+  ctx.strokeStyle = '#6B4F10';
+  ctx.lineWidth = 2;
+  for (let i = 0; i < 4; i++) {
+    const x = BERTH.x + (i / 3) * BERTH.w;
+    ctx.beginPath();
+    ctx.moveTo(x, BERTH.y - BERTH.h);
+    ctx.lineTo(x, BERTH.y + 5);
+    ctx.stroke();
+  }
+
+  // Yanaşma hedef alanı
+  ctx.strokeStyle = 'rgba(0,255,100,0.5)';
+  ctx.lineWidth = 2;
+  ctx.setLineDash([6, 4]);
+  ctx.strokeRect(BERTH.x, BERTH.y - BERTH.h, BERTH.w, BERTH.h + 2);
+  ctx.setLineDash([]);
+
+  // Hedef etiketi
+  ctx.fillStyle = 'rgba(0,255,100,0.6)';
+  ctx.font = '11px Courier New';
+  ctx.textAlign = 'center';
+  ctx.fillText('PARK YERİ', BERTH.x + BERTH.w / 2, BERTH.y - BERTH.h - 8);
+
+  // Baba (mooring bollards)
+  ctx.fillStyle = '#333';
+  [-5, BERTH.w + 5].forEach(ox => {
+    ctx.beginPath();
+    ctx.arc(BERTH.x + ox, BERTH.y - 2, 5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#666'; ctx.lineWidth = 1;
+    ctx.stroke();
+  });
+
+  ctx.restore();
+}
+
+function drawBoat() {
+  ctx.save();
+  ctx.translate(cam.x, cam.y);
+  ctx.translate(boat.x, boat.y);
+  ctx.rotate((boat.heading - 90) * Math.PI / 180); // heading 0=north, canvas -90
+
+  const L = BOAT_LENGTH, W = BOAT_WIDTH;
+
+  // Gölge
+  ctx.shadowColor = 'rgba(0,0,0,0.5)';
+  ctx.shadowBlur = 10;
+  ctx.shadowOffsetX = 4;
+  ctx.shadowOffsetY = 4;
+
+  // Gövde
+  ctx.beginPath();
+  ctx.moveTo(0, -L / 2 + 4);      // baş (pruva)
+  ctx.quadraticCurveTo(W / 2, -L / 2 + 10, W / 2, -L / 2 + 20);
+  ctx.lineTo(W / 2, L / 2 - 8);
+  ctx.quadraticCurveTo(W / 2, L / 2, 0, L / 2);
+  ctx.quadraticCurveTo(-W / 2, L / 2, -W / 2, L / 2 - 8);
+  ctx.lineTo(-W / 2, -L / 2 + 20);
+  ctx.quadraticCurveTo(-W / 2, -L / 2 + 10, 0, -L / 2 + 4);
+  ctx.closePath();
+  ctx.fillStyle = '#e8e0d0';
+  ctx.fill();
+  ctx.strokeStyle = '#aaa';
+  ctx.lineWidth = 1.5;
+  ctx.shadowColor = 'transparent';
+  ctx.stroke();
+
+  // Köprüüstü (bridge)
+  ctx.fillStyle = '#c8c0b0';
+  ctx.fillRect(-W / 2 + 2, -L / 2 + 22, W - 4, L * 0.3);
+
+  // Pencereler
+  ctx.fillStyle = '#88ccff';
+  for (let i = 0; i < 3; i++) {
+    ctx.fillRect(-W / 2 + 4 + i * 6, -L / 2 + 24, 4, 3);
+  }
+
+  // Pruva çizgisi
+  ctx.strokeStyle = '#888';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(-W / 2 + 2, -L / 2 + 18);
+  ctx.lineTo(W / 2 - 2, -L / 2 + 18);
+  ctx.stroke();
+
+  // Motor egzos efekti
+  const portThrottle = boat.portThrottle;
+  const stbdThrottle = boat.stbdThrottle;
+
+  function drawExhaust(side, throttle) {
+    if (Math.abs(throttle) < 0.05) return;
+    const ex = side === 'port' ? -W / 2 + 3 : W / 2 - 3;
+    const ey = L / 2 - 2;
+    const alpha = Math.abs(throttle) * 0.6;
+    const dir = throttle > 0 ? 1 : -1;
+    ctx.beginPath();
+    ctx.arc(ex, ey + dir * 8, 5 * Math.abs(throttle), 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(100,200,255,${alpha})`;
+    ctx.fill();
+  }
+  drawExhaust('port', portThrottle);
+  drawExhaust('stbd', stbdThrottle);
+
+  // Bow thruster efekti
+  if (Math.abs(boat.bowThrust) > 0.05) {
+    const bx = boat.bowThrust > 0 ? W / 2 : -W / 2;
+    const alpha = Math.abs(boat.bowThrust) * 0.7;
+    ctx.beginPath();
+    ctx.arc(bx + (boat.bowThrust > 0 ? 8 : -8), -L / 2 + 12, 6 * Math.abs(boat.bowThrust), 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(0,150,255,${alpha})`;
+    ctx.fill();
+  }
+
+  // Dümen
+  ctx.save();
+  ctx.translate(0, L / 2 - 4);
+  ctx.rotate(boat.rudder * Math.PI / 180);
+  ctx.fillStyle = '#555';
+  ctx.fillRect(-1.5, 0, 3, 10);
+  ctx.restore();
+
+  ctx.restore();
+}
+
+function drawWindArrow() {
+  const t = Date.now() / 1000;
+  const wx = canvas.width - 80;
+  const wy = canvas.height - 80;
+  const windRad = wind.dir * Math.PI / 180;
+
+  ctx.save();
+  ctx.translate(wx, wy);
+
+  // Compass rose background
+  ctx.beginPath();
+  ctx.arc(0, 0, 35, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(0,0,0,0.5)';
+  ctx.fill();
+  ctx.strokeStyle = '#444';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
+  // N/S/E/W
+  ctx.fillStyle = '#666';
+  ctx.font = '9px Courier New';
+  ctx.textAlign = 'center';
+  ctx.fillText('N', 0, -26);
+  ctx.fillText('S', 0, 32);
+  ctx.fillText('W', -28, 4);
+  ctx.fillText('E', 28, 4);
+
+  // Wind arrow
+  ctx.rotate(windRad);
+  ctx.strokeStyle = '#ffcc00';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(0, -25);
+  ctx.lineTo(0, 18);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(0, -25);
+  ctx.lineTo(-6, -12);
+  ctx.moveTo(0, -25);
+  ctx.lineTo(6, -12);
+  ctx.stroke();
+
+  ctx.restore();
+
+  ctx.fillStyle = '#ffcc00';
+  ctx.font = '9px Courier New';
+  ctx.textAlign = 'center';
+  ctx.fillText('RÜZGAR', wx, wy + 48);
+}
+
+function drawCurrentArrow() {
+  const cx = canvas.width - 80;
+  const cy = canvas.height - 180;
+  const currentRad = current.dir * Math.PI / 180;
+
+  ctx.save();
+  ctx.translate(cx, cy);
+
+  ctx.beginPath();
+  ctx.arc(0, 0, 35, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(0,0,0,0.5)';
+  ctx.fill();
+  ctx.strokeStyle = '#444';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
+  ctx.fillStyle = '#555';
+  ctx.font = '9px Courier New';
+  ctx.textAlign = 'center';
+  ctx.fillText('N', 0, -26);
+  ctx.fillText('S', 0, 32);
+  ctx.fillText('W', -28, 4);
+  ctx.fillText('E', 28, 4);
+
+  ctx.rotate(currentRad);
+  ctx.strokeStyle = '#00aaff';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(0, -25);
+  ctx.lineTo(0, 18);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(0, -25);
+  ctx.lineTo(-6, -12);
+  ctx.moveTo(0, -25);
+  ctx.lineTo(6, -12);
+  ctx.stroke();
+
+  ctx.restore();
+
+  ctx.fillStyle = '#00aaff';
+  ctx.font = '9px Courier New';
+  ctx.textAlign = 'center';
+  ctx.fillText('AKINITI', cx, cy + 48);
+}
+
+// ─── Physics ──────────────────────────────────────────────────────────────────
+function degToRad(d) { return d * Math.PI / 180; }
+function radToDeg(r) { return r * 180 / Math.PI; }
+function knotsToMps(k) { return k * 0.5144; }
+function mpsToKnots(m) { return m / 0.5144; }
+function speedKnots() {
+  return mpsToKnots(Math.sqrt(boat.vx * boat.vx + boat.vy * boat.vy) / PIXELS_PER_METER);
+}
+
+function directionToString(deg) {
+  const dirs = ['K','KKD','KD','DKD','D','DGD','GD','GGD','G','GGB','GB','BGB','B','BKB','KB','KKB'];
+  return dirs[Math.round(deg / 22.5) % 16];
+}
+
+function updatePhysics(dt) {
+  const headRad = degToRad(boat.heading - 90);
+  const cosH = Math.cos(headRad), sinH = Math.sin(headRad);
+
+  // ── Engine thrust ──────────────────────────────────────────────
+  // Port engine (left side, offset to left of centerline)
+  const portForce = boat.portThrottle * MAX_ENGINE_THRUST * 0.0003;
+  const stbdForce = boat.stbdThrottle * MAX_ENGINE_THRUST * 0.0003;
+
+  // Combined forward force
+  const totalForce = portForce + stbdForce;
+  const fwdFx = cosH * totalForce;
+  const fwdFy = sinH * totalForce;
+
+  // Differential torque (port left of center, stbd right)
+  const halfBeam = BOAT_WIDTH / 2;
+  const portTorque = portForce * halfBeam;
+  const stbdTorque = -stbdForce * halfBeam;
+  let engineTorque = portTorque + stbdTorque;
+
+  // ── Rudder torque (only effective when moving) ──────────────────
+  const speed = Math.sqrt(boat.vx * boat.vx + boat.vy * boat.vy);
+  const rudderEffect = Math.min(speed / 30, 1) * boat.rudder * 0.008 * (portForce + stbdForce > 0 ? 1 : 0.3);
+  const rudderTorque = rudderEffect * totalForce * 0.5;
+
+  // ── Bow thruster ───────────────────────────────────────────────
+  const bowForce = boat.bowThrust * 8;
+  const bowFx = -sinH * bowForce;  // perpendicular to heading
+  const bowFy = cosH * bowForce;
+  // Bow thruster also creates yaw (applied at bow, creates torque)
+  const bowTorque = -boat.bowThrust * 0.15;
+
+  // ── Wind force ─────────────────────────────────────────────────
+  const windRad = degToRad(wind.dir);
+  const windSpeedMps = knotsToMps(wind.speed);
+  const windFx = Math.sin(windRad) * windSpeedMps * 0.08;
+  const windFy = -Math.cos(windRad) * windSpeedMps * 0.08;
+
+  // Wind torque (wind pushes bow one way)
+  const windTorque = Math.sin(degToRad(wind.dir - boat.heading)) * windSpeedMps * 0.002;
+
+  // ── Current ────────────────────────────────────────────────────
+  const currentRad = degToRad(current.dir);
+  const currentSpeedMps = knotsToMps(current.speed);
+  const currentFx = Math.sin(currentRad) * currentSpeedMps * PIXELS_PER_METER * 0.3;
+  const currentFy = -Math.cos(currentRad) * currentSpeedMps * PIXELS_PER_METER * 0.3;
+
+  // ── Drag ───────────────────────────────────────────────────────
+  const dragFx = -boat.vx * DRAG_LINEAR * dt / BOAT_MASS;
+  const dragFy = -boat.vy * DRAG_LINEAR * dt / BOAT_MASS;
+
+  // Lateral drag (resist sideways movement)
+  const lateralVel = -sinH * boat.vx + cosH * boat.vy; // velocity perpendicular to heading
+  const latDragFx = sinH * lateralVel * DRAG_LATERAL * dt / BOAT_MASS;
+  const latDragFy = -cosH * lateralVel * DRAG_LATERAL * dt / BOAT_MASS;
+
+  const dragOmega = -boat.omega * DRAG_ANGULAR * dt / BOAT_MASS;
+
+  // ── Integrate ──────────────────────────────────────────────────
+  boat.vx += (fwdFx + bowFx + windFx + currentFx) * dt / BOAT_MASS + dragFx + latDragFx;
+  boat.vy += (fwdFy + bowFy + windFy + currentFy) * dt / BOAT_MASS + dragFy + latDragFy;
+
+  const totalTorque = engineTorque + rudderTorque + bowTorque + windTorque;
+  boat.omega += totalTorque * dt / (BOAT_MASS * 0.3) + dragOmega;
+
+  boat.x += boat.vx * dt;
+  boat.y += boat.vy * dt;
+  boat.heading = (boat.heading + radToDeg(boat.omega) * dt + 360) % 360;
+
+  // Clamp omega
+  boat.omega = Math.max(-0.08, Math.min(0.08, boat.omega));
+
+  // ── Boundary ──────────────────────────────────────────────────
+  const margin = 40;
+  const maxX = 2000, maxY = 2000;
+  if (boat.x < margin) { boat.x = margin; boat.vx = Math.abs(boat.vx) * 0.3; }
+  if (boat.y < margin) { boat.y = margin; boat.vy = Math.abs(boat.vy) * 0.3; }
+  if (boat.x > maxX) { boat.x = maxX; boat.vx = -Math.abs(boat.vx) * 0.3; }
+  if (boat.y > maxY) { boat.y = maxY; boat.vy = -Math.abs(boat.vy) * 0.3; }
+
+  // Wind variation
+  windVariation += (Math.random() - 0.5) * 0.2;
+  wind.dir = (wind.dir + windVariation * dt + 360) % 360;
+  wind.speed = Math.max(0.5, Math.min(15, wind.speed + (Math.random() - 0.5) * 0.05));
+}
+
+function handleInput(dt) {
+  // Port engine (W/S)
+  if (keys['KeyW']) boat.portThrottle = Math.min(1, boat.portThrottle + THROTTLE_STEP);
+  else if (keys['KeyS']) boat.portThrottle = Math.max(-1, boat.portThrottle - THROTTLE_STEP);
+  else boat.portThrottle *= 0.98;
+
+  // Starboard engine (ArrowUp/ArrowDown)
+  if (keys['KeyP']) boat.stbdThrottle = Math.min(1, boat.stbdThrottle + THROTTLE_STEP);
+  else if (keys['KeyL']) boat.stbdThrottle = Math.max(-1, boat.stbdThrottle - THROTTLE_STEP);
+  else boat.stbdThrottle *= 0.98;
+
+  // Rudder (A/D)
+  if (keys['KeyA']) boat.rudder = Math.max(-MAX_RUDDER, boat.rudder - RUDDER_STEP);
+  else if (keys['KeyD']) boat.rudder = Math.min(MAX_RUDDER, boat.rudder + RUDDER_STEP);
+  else boat.rudder *= 0.93;
+
+  // Bow thruster (Q/E)
+  if (keys['KeyQ']) boat.bowThrust = Math.max(-1, boat.bowThrust - BOW_STEP);
+  else if (keys['KeyE']) boat.bowThrust = Math.min(1, boat.bowThrust + BOW_STEP);
+  else boat.bowThrust *= 0.92;
+
+  // Snap small values to zero
+  if (Math.abs(boat.portThrottle) < 0.01) boat.portThrottle = 0;
+  if (Math.abs(boat.stbdThrottle) < 0.01) boat.stbdThrottle = 0;
+  if (Math.abs(boat.rudder) < 0.3) boat.rudder = 0;
+  if (Math.abs(boat.bowThrust) < 0.01) boat.bowThrust = 0;
+}
+
+function updateCamera() {
+  cam.x = canvas.width / 2 - boat.x;
+  cam.y = canvas.height / 2 - boat.y;
+}
+
+function drawRudderIndicator() {
+  rCtx.clearRect(0, 0, 80, 80);
+  rCtx.save();
+  rCtx.translate(40, 40);
+
+  // Background arc
+  rCtx.strokeStyle = '#333';
+  rCtx.lineWidth = 6;
+  rCtx.beginPath();
+  rCtx.arc(0, 0, 28, degToRad(-135), degToRad(-45));
+  rCtx.stroke();
+
+  // Colored arc
+  const rudderFrac = boat.rudder / MAX_RUDDER;
+  const arcColor = rudderFrac < 0 ? '#00ccff' : '#ff6600';
+  rCtx.strokeStyle = arcColor;
+  rCtx.lineWidth = 6;
+  rCtx.beginPath();
+  if (rudderFrac >= 0) {
+    rCtx.arc(0, 0, 28, degToRad(-90), degToRad(-90 + rudderFrac * 45));
+  } else {
+    rCtx.arc(0, 0, 28, degToRad(-90 + rudderFrac * 45), degToRad(-90));
+  }
+  rCtx.stroke();
+
+  // Needle
+  const needleAngle = degToRad(-90 + (boat.rudder / MAX_RUDDER) * 45);
+  rCtx.strokeStyle = '#fff';
+  rCtx.lineWidth = 2;
+  rCtx.beginPath();
+  rCtx.moveTo(0, 0);
+  rCtx.lineTo(Math.cos(needleAngle) * 24, Math.sin(needleAngle) * 24);
+  rCtx.stroke();
+
+  // Center dot
+  rCtx.fillStyle = '#fff';
+  rCtx.beginPath();
+  rCtx.arc(0, 0, 3, 0, Math.PI * 2);
+  rCtx.fill();
+
+  rCtx.restore();
+}
+
+function updateHUD() {
+  const speed = speedKnots();
+  document.getElementById('speedVal').textContent = speed.toFixed(1) + ' kn';
+  document.getElementById('headingVal').textContent = String(Math.round(boat.heading)).padStart(3, '0') + '°';
+  document.getElementById('portVal').textContent = Math.round(boat.portThrottle * 100) + '%';
+  document.getElementById('stbdVal').textContent = Math.round(boat.stbdThrottle * 100) + '%';
+  document.getElementById('bowVal').textContent = Math.round(boat.bowThrust * 100) + '%';
+  document.getElementById('rudderVal').textContent = Math.round(boat.rudder) + '°';
+
+  // Throttle bars
+  const portPct = Math.abs(boat.portThrottle) * 50;
+  const stbdPct = Math.abs(boat.stbdThrottle) * 50;
+  document.getElementById('portFwd').style.height = (boat.portThrottle > 0 ? portPct : 0) + '%';
+  document.getElementById('portRev').style.height = (boat.portThrottle < 0 ? portPct : 0) + '%';
+  document.getElementById('stbdFwd').style.height = (boat.stbdThrottle > 0 ? stbdPct : 0) + '%';
+  document.getElementById('stbdRev').style.height = (boat.stbdThrottle < 0 ? stbdPct : 0) + '%';
+  document.getElementById('portDisplay').textContent = Math.round(boat.portThrottle * 100) + '%';
+  document.getElementById('stbdDisplay').textContent = Math.round(boat.stbdThrottle * 100) + '%';
+
+  // Bow bar
+  const bowPct = Math.abs(boat.bowThrust) * 50;
+  document.getElementById('bowLeft').style.width = (boat.bowThrust < 0 ? bowPct : 0) + '%';
+  document.getElementById('bowRight').style.width = (boat.bowThrust > 0 ? bowPct : 0) + '%';
+  document.getElementById('bowDisplay').textContent = Math.round(boat.bowThrust * 100) + '%';
+  document.getElementById('rudderDisplay').textContent = Math.round(boat.rudder) + '°';
+
+  // Environment
+  document.getElementById('windVal').textContent = wind.speed.toFixed(1) + ' kn';
+  document.getElementById('windDir').textContent = directionToString(wind.dir) + ' (' + Math.round(wind.dir) + '°)';
+  document.getElementById('currentVal').textContent = current.speed.toFixed(1) + ' kn';
+  document.getElementById('currentDir').textContent = directionToString(current.dir) + ' (' + Math.round(current.dir) + '°)';
+
+  drawRudderIndicator();
+}
+
+// ─── Docking Score ───────────────────────────────────────────────────────────
+let docked = false;
+let dockedTimer = 0;
+
+function checkDocking() {
+  const bx = boat.x + cam.x - cam.x; // world coords
+  const by = boat.y;
+  const berthCX = BERTH.x + BERTH.w / 2;
+  const berthCY = BERTH.y - BERTH.h / 2;
+
+  const dx = Math.abs(boat.x - berthCX);
+  const dy = Math.abs(boat.y - berthCY);
+  const headingDiff = Math.min(Math.abs(boat.heading - BERTH.targetHeading), 360 - Math.abs(boat.heading - BERTH.targetHeading));
+  const speed = speedKnots();
+
+  const posScore = Math.max(0, 1 - (dx / 40 + dy / 20));
+  const headScore = Math.max(0, 1 - headingDiff / 30);
+  const speedScore = speed < 0.5 ? 1 : Math.max(0, 1 - (speed - 0.5) / 2);
+  const total = (posScore * 0.5 + headScore * 0.3 + speedScore * 0.2) * 100;
+
+  document.getElementById('scoreBar').style.width = Math.round(total) + '%';
+  document.getElementById('scoreBar').style.background = total > 70 ? '#00cc44' : total > 40 ? '#ccaa00' : '#cc4400';
+
+  if (total > 80 && speed < 0.3) {
+    dockedTimer += 1;
+    document.getElementById('scoreText').textContent = `Park: %${Math.round(total)} — ` + (dockedTimer > 60 ? 'TAMAM!' : `${Math.ceil((60 - dockedTimer) / 60)}s bekle`);
+    if (dockedTimer > 60) {
+      showMessage('BAŞARILI PARK! 🚢', '#00cc44');
+      docked = true;
+    }
+  } else {
+    dockedTimer = 0;
+    document.getElementById('scoreText').textContent = `İskeleye yanaş (%${Math.round(total)})`;
+  }
+}
+
+function showMessage(text, color) {
+  const el = document.getElementById('message');
+  el.textContent = text;
+  el.style.display = 'block';
+  el.style.borderColor = color;
+  el.style.color = color;
+  setTimeout(() => { el.style.display = 'none'; }, 3000);
+}
+
+// ─── Reset ───────────────────────────────────────────────────────────────────
+function resetGame() {
+  boat.x = canvas.width / 2 - 200;
+  boat.y = canvas.height / 2 + 100;
+  boat.vx = 0; boat.vy = 0;
+  boat.heading = 0; boat.omega = 0;
+  boat.portThrottle = 0; boat.stbdThrottle = 0;
+  boat.bowThrust = 0; boat.rudder = 0;
+  docked = false; dockedTimer = 0;
+  wind = { speed: 3 + Math.random() * 5, dir: Math.random() * 360 };
+  current = { speed: 0.3 + Math.random() * 0.8, dir: Math.random() * 360 };
+}
+
+window.addEventListener('keydown', e => {
+  if (e.code === 'KeyR') resetGame();
+});
+
+// ─── Main Loop ────────────────────────────────────────────────────────────────
+let lastTime = 0;
+function loop(ts) {
+  const dt = Math.min((ts - lastTime) / 1000, 0.05);
+  lastTime = ts;
+
+  handleInput(dt);
+  if (!docked) updatePhysics(dt);
+  updateCamera();
+
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  drawWater();
+  drawDock();
+  drawBoat();
+  drawWindArrow();
+  drawCurrentArrow();
+
+  updateHUD();
+  checkDocking();
+
+  requestAnimationFrame(loop);
+}
+
+resetGame();
+requestAnimationFrame(loop);
+
+window.addEventListener('resize', () => {
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+});
+</script>
+</body>
+</html>
