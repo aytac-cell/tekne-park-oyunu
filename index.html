@@ -996,143 +996,101 @@ let audioCtx = null;
 const eng = {};
 
 function initAudio() {
-  if (audioCtx) return;
-  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  // Context zaten varsa sadece resume et (askıya alınmış olabilir)
+  if (audioCtx) { audioCtx.resume(); return; }
 
-  // Genel compressor — klipten korur
-  const masterComp = audioCtx.createDynamicsCompressor();
-  masterComp.threshold.value = -6;
-  masterComp.knee.value = 6;
-  masterComp.ratio.value = 8;
-  masterComp.attack.value = 0.003;
-  masterComp.release.value = 0.15;
-  masterComp.connect(audioCtx.destination);
+  try {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  } catch(e) { return; }
 
-  // Distortion eğrisi — dizel gürültüsü için
-  function makeDistCurve(amount) {
-    const n = 256, curve = new Float32Array(n);
-    for (let i = 0; i < n; i++) {
-      const x = (i * 2) / n - 1;
-      curve[i] = ((Math.PI + amount) * x) / (Math.PI + amount * Math.abs(x));
-    }
-    return curve;
-  }
+  // Hemen resume — bazı tarayıcılar oluşturur ama askıda bırakır
+  audioCtx.resume();
 
-  function makeEngine(idleHz, detuneCents) {
-    // 4 harmonik katmanlı sawtooth (dizel karakteri)
-    const harmonics = [1, 2, 3, 4];
-    const hGains   = [0.55, 0.30, 0.18, 0.10];
-    const oscs = harmonics.map((m, i) => {
-      const o = audioCtx.createOscillator();
-      o.type = 'sawtooth';
-      o.frequency.value = idleHz * m;
-      o.detune.value = detuneCents + i * 4;
-      const g = audioCtx.createGain();
-      g.gain.value = hGains[i];
-      o.connect(g); o.start();
-      return { o, g };
-    });
+  // ── Tek motor kanalı oluştur ──────────────────────────────────────────
+  function makeEngine(hz1, hz2, hz3) {
+    // 3 harmonik osillatör
+    const o1 = audioCtx.createOscillator();
+    const o2 = audioCtx.createOscillator();
+    const o3 = audioCtx.createOscillator();
+    o1.type = 'sawtooth'; o1.frequency.value = hz1;
+    o2.type = 'sawtooth'; o2.frequency.value = hz2;
+    o3.type = 'square';   o3.frequency.value = hz3;
 
-    // Tüm harmonikleri mixle
-    const preGain = audioCtx.createGain();
-    preGain.gain.value = 1;
-    oscs.forEach(({ g }) => g.connect(preGain));
-
-    // LFO: piston vurma ritmi (~600 RPM → 10 Hz)
-    const lfo = audioCtx.createOscillator();
-    const lfoAmt = audioCtx.createGain();
-    lfo.frequency.value = 10;
-    lfoAmt.gain.value = 0.25;
-    lfo.connect(lfoAmt);
-    lfoAmt.connect(preGain.gain);
-    lfo.start();
-
-    // Distortion
-    const dist = audioCtx.createWaveShaper();
-    dist.curve = makeDistCurve(80);
-    dist.oversample = '2x';
+    // Harmonik kazançlar
+    const g1 = audioCtx.createGain(); g1.gain.value = 0.5;
+    const g2 = audioCtx.createGain(); g2.gain.value = 0.28;
+    const g3 = audioCtx.createGain(); g3.gain.value = 0.14;
+    o1.connect(g1); o2.connect(g2); o3.connect(g3);
 
     // Alçak geçiren filtre
     const lpf = audioCtx.createBiquadFilter();
     lpf.type = 'lowpass';
-    lpf.frequency.value = 500;
-    lpf.Q.value = 0.9;
+    lpf.frequency.value = 700;
+    lpf.Q.value = 0.8;
+    g1.connect(lpf); g2.connect(lpf); g3.connect(lpf);
 
-    // Çıkış gain'i (başlangıçta 0)
-    const outGain = audioCtx.createGain();
-    outGain.gain.value = 0;
+    // Çıkış — rölanti seviyesi 0.09 (hemen duyulur)
+    const out = audioCtx.createGain();
+    out.gain.value = 0.09;
+    lpf.connect(out);
+    out.connect(audioCtx.destination);
 
-    preGain.connect(dist);
-    dist.connect(lpf);
-    lpf.connect(outGain);
-    outGain.connect(masterComp);
-
-    return { oscs, lpf, outGain, idleHz };
+    o1.start(); o2.start(); o3.start();
+    return { o1, o2, o3, lpf, out };
   }
 
+  // ── Bow thruster ──────────────────────────────────────────────────────
   function makeBow() {
-    // Elektrik motoru: tiz, keskin
-    const osc1 = audioCtx.createOscillator();
-    osc1.type = 'sawtooth';
-    osc1.frequency.value = 180;
+    const osc = audioCtx.createOscillator();
+    osc.type = 'sawtooth';
+    osc.frequency.value = 200;
 
-    const osc2 = audioCtx.createOscillator();
-    osc2.type = 'square';
-    osc2.frequency.value = 360;
+    const lpf = audioCtx.createBiquadFilter();
+    lpf.type = 'lowpass';
+    lpf.frequency.value = 900;
 
-    const g1 = audioCtx.createGain(); g1.gain.value = 0.5;
-    const g2 = audioCtx.createGain(); g2.gain.value = 0.3;
-    osc1.connect(g1); osc2.connect(g2);
+    const out = audioCtx.createGain();
+    out.gain.value = 0; // sadece basıldığında çıkar
 
-    const bpf = audioCtx.createBiquadFilter();
-    bpf.type = 'bandpass';
-    bpf.frequency.value = 350;
-    bpf.Q.value = 1.8;
-
-    const outGain = audioCtx.createGain();
-    outGain.gain.value = 0;
-
-    g1.connect(bpf); g2.connect(bpf);
-    bpf.connect(outGain);
-    outGain.connect(masterComp);
-
-    osc1.start(); osc2.start();
-    return { osc1, osc2, bpf, outGain };
+    osc.connect(lpf); lpf.connect(out); out.connect(audioCtx.destination);
+    osc.start();
+    return { osc, out };
   }
 
-  eng.port = makeEngine(55,  0);   // sol motor
-  eng.stbd = makeEngine(58, -8);   // sağ motor (farklı ton = titreşim)
+  // Sol motor: 60/120/180 Hz   Sağ motor: 64/128/192 Hz (farklı ton)
+  eng.port = makeEngine(60, 120, 180);
+  eng.stbd = makeEngine(64, 128, 192);
   eng.bow  = makeBow();
 }
 
 function updateAudio() {
   if (!audioCtx) return;
+  // Context hâlâ askıdaysa uyandır
+  if (audioCtx.state === 'suspended') { audioCtx.resume(); return; }
+
   const t = audioCtx.currentTime;
-  const s = 0.12; // smoothing süresi
+  const s = 0.10; // saniye cinsinden smooth süresi
 
-  // ── Sol Motor ──
-  const pAbs = Math.abs(boat.portThrottle);
-  // rölanti ses seviyesi 0.07, tam gazda 0.32
-  eng.port.outGain.gain.setTargetAtTime(0.07 + pAbs * 0.25, t, s);
-  eng.port.oscs.forEach(({ o }, i) => {
-    o.frequency.setTargetAtTime((55 + pAbs * 85) * (i + 1), t, s);
-  });
-  eng.port.lpf.frequency.setTargetAtTime(250 + pAbs * 900, t, s);
+  // Sol motor
+  const p = Math.abs(boat.portThrottle);
+  eng.port.out.gain.setTargetAtTime(0.09 + p * 0.30, t, s);
+  eng.port.o1.frequency.setTargetAtTime( 60 + p *  80, t, s);
+  eng.port.o2.frequency.setTargetAtTime(120 + p * 160, t, s);
+  eng.port.o3.frequency.setTargetAtTime(180 + p * 240, t, s);
+  eng.port.lpf.frequency.setTargetAtTime(400 + p * 1400, t, s);
 
-  // ── Sağ Motor ──
-  const sAbs = Math.abs(boat.stbdThrottle);
-  eng.stbd.outGain.gain.setTargetAtTime(0.07 + sAbs * 0.25, t, s);
-  eng.stbd.oscs.forEach(({ o }, i) => {
-    o.frequency.setTargetAtTime((58 + sAbs * 85) * (i + 1), t, s);
-  });
-  eng.stbd.lpf.frequency.setTargetAtTime(250 + sAbs * 900, t, s);
+  // Sağ motor
+  const q = Math.abs(boat.stbdThrottle);
+  eng.stbd.out.gain.setTargetAtTime(0.09 + q * 0.30, t, s);
+  eng.stbd.o1.frequency.setTargetAtTime( 64 + q *  80, t, s);
+  eng.stbd.o2.frequency.setTargetAtTime(128 + q * 160, t, s);
+  eng.stbd.o3.frequency.setTargetAtTime(192 + q * 240, t, s);
+  eng.stbd.lpf.frequency.setTargetAtTime(400 + q * 1400, t, s);
 
-  // ── Bow Thruster ──
-  const bAbs = Math.abs(boat.bowThrust);
-  eng.bow.outGain.gain.setTargetAtTime(bAbs * 0.18, t, 0.05);
-  eng.bow.osc1.frequency.setTargetAtTime(160 + bAbs * 200, t, 0.05);
-  eng.bow.osc2.frequency.setTargetAtTime(320 + bAbs * 400, t, 0.05);
-  eng.bow.bpf.frequency.setTargetAtTime(300 + bAbs * 350, t, 0.05);
+  // Bow thruster
+  const b = Math.abs(boat.bowThrust);
+  eng.bow.out.gain.setTargetAtTime(b * 0.22, t, 0.04);
+  eng.bow.osc.frequency.setTargetAtTime(180 + b * 280, t, 0.04);
 }
 
 // ── Main loop ─────────────────────────────────────────────────────────────
