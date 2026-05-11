@@ -234,7 +234,14 @@ let windVariation = 0;
 
 // ── Boat ──────────────────────────────────────────────────────────────────
 let boat = { x: 0, y: 0, vx: 0, vy: 0, heading: 0, omega: 0,
-             portThrottle: 0, stbdThrottle: 0, bowThrust: 0, rudder: 0 };
+             portThrottle: 0, stbdThrottle: 0, bowThrust: 0, rudder: 0,
+             damage: 0, sinking: false, sinkTimer: 0, alpha: 1, flashTimer: 0 };
+
+// Çarpışma dikdörtgenleri (dünya koordinatları)
+const collRects = [
+  { x: PIER.x - 20, y: PIER.y - 80, w: PIER.w + 40, h: 98 }, // iskele + rıhtım
+  ...fingers
+];
 
 // ── Camera (smooth follow) ─────────────────────────────────────────────────
 let cam = { x: 0, y: 0 };
@@ -447,11 +454,17 @@ function drawBoatShape(c, L, W, color, isPlayer) {
 // ── Draw player boat ──────────────────────────────────────────────────────
 function drawPlayerBoat() {
   ctx.save();
+  ctx.globalAlpha = boat.alpha ?? 1;
   ctx.translate(boat.x + cam.x, boat.y + cam.y);
-  ctx.rotate(degToRad(boat.heading));
+  if (boat.sinking) ctx.rotate(degToRad(boat.heading + boat.sinkTimer * 20));
+  else ctx.rotate(degToRad(boat.heading));
 
-  ctx.shadowColor = 'rgba(0,0,0,0.6)';
-  ctx.shadowBlur = 12; ctx.shadowOffsetX = 3; ctx.shadowOffsetY = 3;
+  if (boat.flashTimer > 0) {
+    ctx.shadowColor = '#ff2200'; ctx.shadowBlur = 24;
+  } else {
+    ctx.shadowColor = 'rgba(0,0,0,0.6)'; ctx.shadowBlur = 12;
+  }
+  ctx.shadowOffsetX = 3; ctx.shadowOffsetY = 3;
 
   drawBoatShape(ctx, BOAT_L, BOAT_W, '#f0e8d8', true);
   ctx.shadowColor = 'transparent';
@@ -489,6 +502,7 @@ function drawPlayerBoat() {
   }
 
   ctx.restore();
+  ctx.globalAlpha = 1;
 }
 
 // ── Compass arrows ─────────────────────────────────────────────────────────
@@ -578,6 +592,18 @@ function drawTargetArrow() {
 
 // ── Physics ────────────────────────────────────────────────────────────────
 function updatePhysics(dt) {
+  // Flash timer
+  if (boat.flashTimer > 0) boat.flashTimer -= dt;
+
+  // Batma animasyonu
+  if (boat.sinking) {
+    boat.sinkTimer += dt;
+    boat.alpha = Math.max(0, 1 - boat.sinkTimer / 3.5);
+    boat.vx *= 0.88; boat.vy *= 0.88; boat.omega *= 0.85;
+    if (boat.sinkTimer > 4) resetGame();
+    return;
+  }
+
   const headRad = degToRad(boat.heading - 90);
   const cosH = Math.cos(headRad), sinH = Math.sin(headRad);
   const portF  = boat.portThrottle;
@@ -762,6 +788,93 @@ function checkDocking() {
   }
 }
 
+// ── Çarpışma & Hasar ──────────────────────────────────────────────────────
+function circleRect(cx, cy, r, rx, ry, rw, rh) {
+  const nx = Math.max(rx, Math.min(cx, rx + rw));
+  const ny = Math.max(ry, Math.min(cy, ry + rh));
+  const dx = cx - nx, dy = cy - ny;
+  return { hit: dx*dx + dy*dy < r*r, nx: dx, ny: dy };
+}
+
+function checkCollisions() {
+  if (boat.sinking) return;
+  const R = 10; // tekne çarpışma yarıçapı
+  const speed = Math.sqrt(boat.vx**2 + boat.vy**2);
+
+  // Rıhtım ve parmak iskeleler
+  for (const rect of collRects) {
+    const { hit, nx, ny } = circleRect(boat.x, boat.y, R, rect.x, rect.y, rect.w, rect.h);
+    if (!hit) continue;
+    const d = Math.sqrt(nx*nx + ny*ny) || 1;
+    const nnx = nx/d, nny = ny/d;
+    // Dışarı it
+    boat.x = (Math.max(rect.x, Math.min(boat.x, rect.x+rect.w)) + nnx*(R+1));
+    boat.y = (Math.max(rect.y, Math.min(boat.y, rect.y+rect.h)) + nny*(R+1));
+    // Darbe hızı
+    const impact = Math.abs(boat.vx*nnx + boat.vy*nny);
+    // Sekme
+    const dot = boat.vx*nnx + boat.vy*nny;
+    boat.vx = (boat.vx - 1.6*dot*nnx) * 0.35;
+    boat.vy = (boat.vy - 1.6*dot*nny) * 0.35;
+    if (impact > 0.8) {
+      boat.damage = Math.min(1, boat.damage + impact * 0.05);
+      boat.flashTimer = 0.4;
+    }
+  }
+
+  // Dolu teknelerle çarpışma
+  for (const sb of staticBoats) {
+    const dx = boat.x - sb.x, dy = boat.y - sb.y;
+    const dist = Math.sqrt(dx*dx + dy*dy);
+    const minDist = R + 13;
+    if (dist >= minDist) continue;
+    const nnx = dx/(dist||1), nny = dy/(dist||1);
+    boat.x = sb.x + nnx*(minDist+1);
+    boat.y = sb.y + nny*(minDist+1);
+    const impact = Math.abs(boat.vx*nnx + boat.vy*nny);
+    const dot = boat.vx*nnx + boat.vy*nny;
+    boat.vx = (boat.vx - 1.6*dot*nnx) * 0.35;
+    boat.vy = (boat.vy - 1.6*dot*nny) * 0.35;
+    if (impact > 0.8) {
+      boat.damage = Math.min(1, boat.damage + impact * 0.06);
+      boat.flashTimer = 0.4;
+    }
+  }
+
+  // %60 hasar → bat
+  if (boat.damage >= 0.6 && !boat.sinking) {
+    boat.sinking = true;
+    boat.sinkTimer = 0;
+    showMsg('⚠ TEKNE BATIYOR!', '#ff3300');
+  }
+}
+
+function drawDamageBar() {
+  const bw = 180, bh = 14, bx = 10, by = canvas.height - 100;
+  ctx.fillStyle = 'rgba(0,0,0,0.75)';
+  ctx.fillRect(bx-4, by-20, bw+8, bh+28);
+  ctx.strokeStyle = '#444'; ctx.lineWidth = 1;
+  ctx.strokeRect(bx-4, by-20, bw+8, bh+28);
+  ctx.fillStyle = '#777'; ctx.font = '10px Courier New'; ctx.textAlign = 'left';
+  ctx.fillText('HASAR', bx, by-6);
+  ctx.fillStyle = '#1a1a1a'; ctx.fillRect(bx, by, bw, bh);
+  const col = boat.damage < 0.3 ? '#00cc44' : boat.damage < 0.55 ? '#ccaa00' : '#ff2200';
+  ctx.fillStyle = col;
+  ctx.fillRect(bx, by, bw * boat.damage, bh);
+  ctx.strokeStyle = '#555'; ctx.lineWidth = 1;
+  ctx.strokeRect(bx, by, bw, bh);
+  // %60 çizgisi
+  ctx.strokeStyle = 'rgba(255,50,0,0.9)'; ctx.lineWidth = 2;
+  ctx.setLineDash([4,3]);
+  const lx = bx + bw * 0.6;
+  ctx.beginPath(); ctx.moveTo(lx, by-3); ctx.lineTo(lx, by+bh+3); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle = 'rgba(255,80,0,0.8)'; ctx.font = '8px Courier New'; ctx.textAlign = 'center';
+  ctx.fillText('%60', lx, by+bh+10);
+  ctx.fillStyle = col; ctx.font = 'bold 11px Courier New'; ctx.textAlign = 'right';
+  ctx.fillText(Math.round(boat.damage*100)+'%', bx+bw, by-6);
+}
+
 function showMsg(text, color) {
   const el=document.getElementById('message');
   el.innerHTML=text; el.style.display='block';
@@ -789,6 +902,7 @@ function resetGame() {
   boat.vx=0; boat.vy=0;
   boat.heading=0; boat.omega=0;
   boat.portThrottle=0; boat.stbdThrottle=0; boat.bowThrust=0; boat.rudder=0;
+  boat.damage=0; boat.sinking=false; boat.sinkTimer=0; boat.alpha=1; boat.flashTimer=0;
   docked=false; dockedTimer=0; wakeParticles.length=0;
   cam.x = canvas.width/2 - boat.x;
   cam.y = canvas.height/2 - boat.y;
@@ -822,8 +936,10 @@ function loop(ts) {
   drawCompassArrow(canvas.width-80, canvas.height-80, degToRad(wind.dir), '#ffcc00', 'RÜZGAR');
   drawCompassArrow(canvas.width-80, canvas.height-180, degToRad(current.dir), '#00aaff', 'AKINITI');
 
+  checkCollisions();
   updateHUD();
   if (!docked) checkDocking();
+  drawDamageBar();
   drawMinimap();
 
   requestAnimationFrame(loop);
