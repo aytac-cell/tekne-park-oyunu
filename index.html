@@ -762,31 +762,39 @@ function updateHUD() {
 }
 
 // ── Docking check ─────────────────────────────────────────────────────────
-let docked=false, dockedTimer=0;
+let docked=false;
 function checkDocking() {
-  const dx = Math.abs(boat.x - TARGET.x);
-  const dy = Math.abs(boat.y - TARGET.y);
-  const hDiff = Math.min(Math.abs(boat.heading-TARGET.heading), 360-Math.abs(boat.heading-TARGET.heading));
-  const spd = mpsToKnots(Math.sqrt(boat.vx**2+boat.vy**2)/4);
-
-  const posScore = Math.max(0, 1-(dx/30+dy/20));
-  const headScore = Math.max(0, 1-hDiff/25);
-  const spdScore = spd<0.5 ? 1 : Math.max(0,1-(spd-0.5)/2);
-  const total = (posScore*0.5+headScore*0.3+spdScore*0.2)*100;
+  // Tekne yeşil karenin (boş slot) içine girdi mi?
+  const inside = boat.x >= targetSlip.x && boat.x <= targetSlip.x + targetSlip.w &&
+                 boat.y >= targetSlip.y && boat.y <= targetSlip.y + targetSlip.h;
 
   const bar = document.getElementById('scoreBar');
-  bar.style.width=Math.round(total)+'%';
-  bar.style.background=total>70?'#00cc44':total>40?'#ccaa00':'#cc4400';
-
-  if (total>80 && spd<0.3) {
-    dockedTimer++;
-    const wait=Math.max(0, Math.ceil((90-dockedTimer)/60));
-    document.getElementById('scoreText').textContent=`Park %${Math.round(total)} — ${wait>0?wait+'s bekle':'TAMAM!'}`;
-    if (dockedTimer>90) { showMsg('BAŞARILI PARK! MERHABA KÖRFEZ!','#00cc44'); docked=true; }
+  if (inside) {
+    bar.style.width = '100%';
+    bar.style.background = '#00cc44';
+    document.getElementById('scoreText').textContent = 'Park başarılı!';
+    docked = true;
+    showWin();
   } else {
-    dockedTimer=0;
-    document.getElementById('scoreText').textContent=`Boş slota yanaş (%${Math.round(total)})`;
+    // Yakınlık göstergesi (bilgi amaçlı)
+    const dx = boat.x - (targetSlip.x + targetSlip.w/2);
+    const dy = boat.y - (targetSlip.y + targetSlip.h/2);
+    const dist = Math.round(Math.sqrt(dx*dx + dy*dy) / 4);
+    bar.style.width = Math.max(0, 100 - dist) + '%';
+    bar.style.background = dist < 20 ? '#00cc44' : dist < 50 ? '#ccaa00' : '#cc4400';
+    document.getElementById('scoreText').textContent = `Boş slota yanaş (${dist}m)`;
   }
+}
+
+function showWin() {
+  const el = document.getElementById('message');
+  el.innerHTML = '⚓ TEBRİKLER KAPTAN! ⚓<br><span style="font-size:14px;color:#aaffcc">Körfez Marinası\'na hoş geldiniz!</span>';
+  el.style.display = 'block';
+  el.style.borderColor = '#00cc44';
+  el.style.color = '#00ff88';
+  el.style.fontSize = '28px';
+  // Konfeti efekti
+  confettiTimer = 3.0;
 }
 
 // ── Çarpışma & Hasar ──────────────────────────────────────────────────────
@@ -923,21 +931,57 @@ function resetGame() {
   boat.heading=0; boat.omega=0;
   boat.portThrottle=0; boat.stbdThrottle=0; boat.bowThrust=0; boat.rudder=0;
   boat.damage=0; boat.sinking=false; boat.sinkTimer=0; boat.alpha=1; boat.flashTimer=0;
-  docked=false; dockedTimer=0; wakeParticles.length=0;
+  docked=false; wakeParticles.length=0; confettiParts.length=0; confettiTimer=0;
+  document.getElementById('message').style.display='none';
   cam.x = canvas.width/2 - boat.x;
   cam.y = canvas.height/2 - boat.y;
   wind={speed:4+Math.random()*4, dir:Math.random()*360};
   current={speed:0.4+Math.random()*0.6, dir:Math.random()*360};
 }
 
+// ── Konfeti ───────────────────────────────────────────────────────────────
+function spawnConfetti() {
+  for (let i = 0; i < 8; i++) {
+    confettiParts.push({
+      x: Math.random() * canvas.width,
+      y: -10,
+      vx: (Math.random()-0.5)*3,
+      vy: 2 + Math.random()*4,
+      rot: Math.random()*360,
+      rotV: (Math.random()-0.5)*10,
+      color: ['#00ff88','#ffcc00','#ff6644','#44aaff','#ff44aa'][Math.floor(Math.random()*5)],
+      w: 8+Math.random()*8, h: 5+Math.random()*5,
+      life: 1.0
+    });
+  }
+}
+function updateDrawConfetti(dt) {
+  if (confettiTimer > 0) { confettiTimer -= dt; spawnConfetti(); }
+  for (let i = confettiParts.length-1; i >= 0; i--) {
+    const p = confettiParts[i];
+    p.x += p.vx; p.y += p.vy; p.rot += p.rotV;
+    p.life -= dt * 0.4;
+    if (p.y > canvas.height + 20 || p.life <= 0) { confettiParts.splice(i,1); continue; }
+    ctx.save();
+    ctx.globalAlpha = p.life;
+    ctx.translate(p.x, p.y);
+    ctx.rotate(degToRad(p.rot));
+    ctx.fillStyle = p.color;
+    ctx.fillRect(-p.w/2, -p.h/2, p.w, p.h);
+    ctx.restore();
+  }
+  ctx.globalAlpha = 1;
+}
+
 // ── Main loop ─────────────────────────────────────────────────────────────
-let lastTime=0, wakeTimer=0;
+let lastTime=0, wakeTimer=0, confettiTimer=0;
+const confettiParts = [];
 function loop(ts) {
   const dt=Math.min((ts-lastTime)/1000, 0.05);
   lastTime=ts;
 
-  handleInput(dt);
   if (!docked) {
+    handleInput(dt);
     updatePhysics(dt);
     updateWake(dt);
     wakeTimer+=dt;
@@ -965,11 +1009,12 @@ function loop(ts) {
   drawCompassArrow(canvas.width-80, canvas.height-80, degToRad(wind.dir), '#ffcc00', 'RÜZGAR');
   drawCompassArrow(canvas.width-80, canvas.height-180, degToRad(current.dir), '#00aaff', 'AKINITI');
 
-  checkCollisions();
+  if (!docked) checkCollisions();
   updateHUD();
   if (!docked) checkDocking();
   drawDamageBar();
   drawMinimap();
+  updateDrawConfetti(dt);
 
   requestAnimationFrame(loop);
 }
