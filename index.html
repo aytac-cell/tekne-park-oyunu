@@ -398,7 +398,7 @@ function drawMarina() {
   staticBoats.forEach(b => {
     ctx.save();
     ctx.translate(b.x, b.y);
-    ctx.rotate(degToRad(b.heading - 90));
+    ctx.rotate(degToRad(b.heading));
     drawBoatShape(ctx, BOAT_L * 0.9, BOAT_W, b.color, false);
     ctx.restore();
   });
@@ -448,7 +448,7 @@ function drawBoatShape(c, L, W, color, isPlayer) {
 function drawPlayerBoat() {
   ctx.save();
   ctx.translate(boat.x + cam.x, boat.y + cam.y);
-  ctx.rotate(degToRad(boat.heading - 90));
+  ctx.rotate(degToRad(boat.heading));
 
   ctx.shadowColor = 'rgba(0,0,0,0.6)';
   ctx.shadowBlur = 12; ctx.shadowOffsetX = 3; ctx.shadowOffsetY = 3;
@@ -613,7 +613,7 @@ function updatePhysics(dt) {
   boat.vy -= cosH * latVel * LAT_DRAG * dt;
 
   // Dönüş: diferansiyel motor + dümen + bow thruster
-  const rudTorque = degToRad(boat.rudder) * totalF * Math.min(speed / 5, 1) * 1.8;
+  const rudTorque = degToRad(boat.rudder) * Math.min(speed / 4, 1) * 2.8;
   boat.omega += ((portF - stbdF) * TURN_ACC - boat.bowThrust * BOW_TURN + rudTorque - boat.omega * TURN_DRAG) * dt;
   boat.omega = Math.max(-0.08, Math.min(0.08, boat.omega));
   boat.x += boat.vx * dt;
@@ -632,12 +632,6 @@ function updatePhysics(dt) {
 }
 
 function handleInput(dt) {
-  if (keys['KeyW']) boat.portThrottle = Math.min(1, boat.portThrottle + THROTTLE_STEP);
-  else if (keys['KeyS']) boat.portThrottle = Math.max(-1, boat.portThrottle - THROTTLE_STEP);
-
-  if (keys['KeyP']) boat.stbdThrottle = Math.min(1, boat.stbdThrottle + THROTTLE_STEP);
-  else if (keys['KeyL']) boat.stbdThrottle = Math.max(-1, boat.stbdThrottle - THROTTLE_STEP);
-
   if (keys['KeyA']) boat.rudder = Math.max(-MAX_RUDDER, boat.rudder - RUDDER_STEP);
   else if (keys['KeyD']) boat.rudder = Math.min(MAX_RUDDER, boat.rudder + RUDDER_STEP);
 
@@ -696,10 +690,10 @@ function drawMinimap() {
   mctx.beginPath(); mctx.arc(boat.x*sx, boat.y*sy, 3, 0, Math.PI*2);
   mctx.fillStyle='#ff6600'; mctx.fill();
   // direction tick
-  const hr = degToRad(boat.heading-90);
+  const hr = degToRad(boat.heading);
   mctx.strokeStyle='#ff6600'; mctx.lineWidth=1;
   mctx.beginPath(); mctx.moveTo(boat.x*sx, boat.y*sy);
-  mctx.lineTo(boat.x*sx+Math.cos(hr)*8, boat.y*sy+Math.sin(hr)*8);
+  mctx.lineTo(boat.x*sx+Math.sin(hr)*8, boat.y*sy-Math.cos(hr)*8);
   mctx.stroke();
   // border
   mctx.strokeStyle='#444'; mctx.lineWidth=1; mctx.strokeRect(0,0,MW,MH);
@@ -777,7 +771,15 @@ function showMsg(text, color) {
 
 // ── Keys ──────────────────────────────────────────────────────────────────
 const keys={};
-window.addEventListener('keydown',e=>{keys[e.code]=true; if(!['F5','F12'].includes(e.key)) e.preventDefault();});
+window.addEventListener('keydown',e=>{
+  keys[e.code]=true;
+  if(!['F5','F12'].includes(e.key)) e.preventDefault();
+  // Gaz: her tuş basışında %5
+  if(e.code==='KeyW') boat.portThrottle = Math.min(1, Math.round((boat.portThrottle+0.05)*100)/100);
+  if(e.code==='KeyS') boat.portThrottle = Math.max(-1, Math.round((boat.portThrottle-0.05)*100)/100);
+  if(e.code==='KeyP') boat.stbdThrottle = Math.min(1, Math.round((boat.stbdThrottle+0.05)*100)/100);
+  if(e.code==='KeyL') boat.stbdThrottle = Math.max(-1, Math.round((boat.stbdThrottle-0.05)*100)/100);
+});
 window.addEventListener('keyup',e=>{keys[e.code]=false;});
 window.addEventListener('keydown',e=>{if(e.code==='KeyR') resetGame();});
 
