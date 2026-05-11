@@ -529,10 +529,10 @@ function updatePhysics(dt) {
   const cRad = degToRad(current.dir);
   const curFx = Math.sin(cRad)*current.speed*220, curFy = -Math.cos(cRad)*current.speed*220;
 
-  const dragFx = -boat.vx * DRAG_LIN * dt;
-  const dragFy = -boat.vy * DRAG_LIN * dt;
+  const dragFx = -boat.vx * DRAG_LIN * dt / MASS;
+  const dragFy = -boat.vy * DRAG_LIN * dt / MASS;
   const latVel = -sinH*boat.vx + cosH*boat.vy;
-  const latDx = sinH*latVel*DRAG_LAT*dt, latDy = -cosH*latVel*DRAG_LAT*dt;
+  const latDx = sinH*latVel*DRAG_LAT*dt/MASS, latDy = -cosH*latVel*DRAG_LAT*dt/MASS;
   const dragW = -boat.omega * DRAG_ANG * dt / MASS;
 
   boat.vx += (fwdFx+bowFx+windFx+curFx)*dt/MASS + dragFx;
