@@ -61,11 +61,21 @@
     display: none; text-align: center; pointer-events: none;
   }
   #keymap {
-    position: fixed; top: 10px; left: 50%; transform: translateX(-50%);
-    background: rgba(0,0,0,0.7); border: 1px solid #333; border-radius: 8px;
-    padding: 6px 14px; font-size: 10px; color: #888; text-align: center;
-    pointer-events: none;
+    position: fixed; top: 12px; left: 50%; transform: translateX(-50%);
+    background: rgba(0,0,0,0.82); border: 1px solid #556; border-radius: 10px;
+    padding: 10px 22px; font-size: 13px; color: #ccc; text-align: center;
+    pointer-events: none; line-height: 2;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.6);
   }
+  #keymap .krow { display: flex; gap: 18px; justify-content: center; flex-wrap: wrap; }
+  #keymap .kitem { display: flex; align-items: center; gap: 6px; }
+  #keymap kbd {
+    display: inline-block; background: #222; border: 1px solid #666;
+    border-bottom: 3px solid #444; border-radius: 5px;
+    padding: 2px 7px; font-size: 12px; font-family: 'Courier New', monospace;
+    color: #fff; min-width: 22px; text-align: center; line-height: 1.5;
+  }
+  #keymap .klabel { color: #aaa; font-size: 12px; }
   .progress-bar { width: 100%; height: 6px; background: #222; border-radius: 3px; margin-top: 4px; }
   .progress-fill { height: 100%; border-radius: 3px; transition: width 0.3s; }
   #minimap {
@@ -79,7 +89,14 @@
 <canvas id="minimap" width="160" height="120"></canvas>
 
 <div id="keymap">
-  Sol Motor: W/S &nbsp;|&nbsp; Sağ Motor: P/L &nbsp;|&nbsp; Dümen: A/D &nbsp;|&nbsp; Bow Thruster: Q/E &nbsp;|&nbsp; Zoom: ↑/↓ &nbsp;|&nbsp; R: Yeniden Başla
+  <div class="krow">
+    <div class="kitem"><kbd>W</kbd><kbd>S</kbd><span class="klabel">Sol Motor</span></div>
+    <div class="kitem"><kbd>P</kbd><kbd>L</kbd><span class="klabel">Sağ Motor</span></div>
+    <div class="kitem"><kbd>A</kbd><kbd>D</kbd><span class="klabel">Dümen</span></div>
+    <div class="kitem"><kbd>Q</kbd><kbd>E</kbd><span class="klabel">Bow Thruster</span></div>
+    <div class="kitem"><kbd>↑</kbd><kbd>↓</kbd><span class="klabel">Zoom</span></div>
+    <div class="kitem"><kbd>R</kbd><span class="klabel">Yeniden Başla</span></div>
+  </div>
 </div>
 
 <div id="envPanel">
@@ -160,7 +177,7 @@ canvas.width = window.innerWidth;
 canvas.height = window.innerHeight;
 
 // ── Constants ──────────────────────────────────────────────────────────────
-const BOAT_L = 50, BOAT_W = 14;
+const BOAT_L = 80, BOAT_W = 22;
 const THROTTLE_STEP = 0.015, BOW_STEP = 0.02, RUDDER_STEP = 1.5, MAX_RUDDER = 35;
 // Fizik — tüm değerler px/s biriminde, kütlesiz basit model
 const ACCEL     = 7.0;   // px/s² her motor tam gazda
