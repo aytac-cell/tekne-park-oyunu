@@ -161,9 +161,9 @@ canvas.height = window.innerHeight;
 
 // ── Constants ──────────────────────────────────────────────────────────────
 const BOAT_L = 50, BOAT_W = 14;
-const MAX_THRUST = 440 * 745.7;
+const ENGINE_FORCE = 480;   // px-birim kuvvet, her motor tam gazda
 const THROTTLE_STEP = 0.015, BOW_STEP = 0.02, RUDDER_STEP = 1.5, MAX_RUDDER = 35;
-const MASS = 45000, DRAG_LIN = 1800, DRAG_ANG = 180000, DRAG_LAT = 6000;
+const MASS = 2000, DRAG_LIN = 55, DRAG_ANG = 22000, DRAG_LAT = 420;
 
 function degToRad(d) { return d * Math.PI / 180; }
 function radToDeg(r) { return r * 180 / Math.PI; }
@@ -509,37 +509,36 @@ function drawCompassArrow(cx, cy, angle, color, label) {
 function updatePhysics(dt) {
   const headRad = degToRad(boat.heading - 90);
   const cosH = Math.cos(headRad), sinH = Math.sin(headRad);
-  const portF = boat.portThrottle * MAX_THRUST * 0.0003;
-  const stbdF = boat.stbdThrottle * MAX_THRUST * 0.0003;
+  const portF = boat.portThrottle * ENGINE_FORCE;
+  const stbdF = boat.stbdThrottle * ENGINE_FORCE;
   const totalF = portF + stbdF;
   const fwdFx = cosH * totalF, fwdFy = sinH * totalF;
   const engTorque = portF*(BOAT_W/2) - stbdF*(BOAT_W/2);
 
   const speed = Math.sqrt(boat.vx**2 + boat.vy**2);
-  const rudTorque = Math.min(speed/30,1) * boat.rudder * 0.008 * (totalF > 0 ? 1 : 0.3) * totalF * 0.5;
+  const rudTorque = Math.min(speed/8, 1) * degToRad(boat.rudder) * totalF * 0.12;
 
-  const bowF = boat.bowThrust * 8;
+  const bowF = boat.bowThrust * 110;
   const bowFx = -sinH * bowF, bowFy = cosH * bowF;
-  const bowTorque = -boat.bowThrust * 0.15;
+  const bowTorque = -boat.bowThrust * 18;
 
   const wRad = degToRad(wind.dir);
-  const wSpd = knotsToMps(wind.speed);
-  const windFx = Math.sin(wRad)*wSpd*0.08, windFy = -Math.cos(wRad)*wSpd*0.08;
-  const windTorque = Math.sin(degToRad(wind.dir - boat.heading)) * wSpd * 0.002;
+  const windFx = Math.sin(wRad)*wind.speed*7, windFy = -Math.cos(wRad)*wind.speed*7;
+  const windTorque = Math.sin(degToRad(wind.dir - boat.heading)) * wind.speed * 1.5;
 
   const cRad = degToRad(current.dir);
-  const cSpd = knotsToMps(current.speed);
-  const curFx = Math.sin(cRad)*cSpd*4*0.3, curFy = -Math.cos(cRad)*cSpd*4*0.3;
+  const curFx = Math.sin(cRad)*current.speed*220, curFy = -Math.cos(cRad)*current.speed*220;
 
-  const dragFx = -boat.vx * DRAG_LIN * dt / MASS;
-  const dragFy = -boat.vy * DRAG_LIN * dt / MASS;
+  const dragFx = -boat.vx * DRAG_LIN * dt;
+  const dragFy = -boat.vy * DRAG_LIN * dt;
   const latVel = -sinH*boat.vx + cosH*boat.vy;
-  const latDx = sinH*latVel*DRAG_LAT*dt/MASS, latDy = -cosH*latVel*DRAG_LAT*dt/MASS;
+  const latDx = sinH*latVel*DRAG_LAT*dt, latDy = -cosH*latVel*DRAG_LAT*dt;
   const dragW = -boat.omega * DRAG_ANG * dt / MASS;
 
-  boat.vx += (fwdFx+bowFx+windFx+curFx)*dt/MASS + dragFx + latDx;
-  boat.vy += (fwdFy+bowFy+windFy+curFy)*dt/MASS + dragFy + latDy;
-  boat.omega += (engTorque+rudTorque+bowTorque+windTorque)*dt/(MASS*0.3) + dragW;
+  boat.vx += (fwdFx+bowFx+windFx+curFx)*dt/MASS + dragFx;
+  boat.vy += (fwdFy+bowFy+windFy+curFy)*dt/MASS + dragFy;
+  boat.vx += latDx; boat.vy += latDy;
+  boat.omega += (engTorque+rudTorque+bowTorque+windTorque)*dt/(MASS*0.25) + dragW;
   boat.omega = Math.max(-0.08, Math.min(0.08, boat.omega));
   boat.x += boat.vx * dt;
   boat.y += boat.vy * dt;
@@ -559,23 +558,17 @@ function updatePhysics(dt) {
 function handleInput(dt) {
   if (keys['KeyW']) boat.portThrottle = Math.min(1, boat.portThrottle + THROTTLE_STEP);
   else if (keys['KeyS']) boat.portThrottle = Math.max(-1, boat.portThrottle - THROTTLE_STEP);
-  else boat.portThrottle *= 0.98;
 
   if (keys['KeyP']) boat.stbdThrottle = Math.min(1, boat.stbdThrottle + THROTTLE_STEP);
   else if (keys['KeyL']) boat.stbdThrottle = Math.max(-1, boat.stbdThrottle - THROTTLE_STEP);
-  else boat.stbdThrottle *= 0.98;
 
   if (keys['KeyA']) boat.rudder = Math.max(-MAX_RUDDER, boat.rudder - RUDDER_STEP);
   else if (keys['KeyD']) boat.rudder = Math.min(MAX_RUDDER, boat.rudder + RUDDER_STEP);
-  else boat.rudder *= 0.93;
 
   if (keys['KeyQ']) boat.bowThrust = Math.max(-1, boat.bowThrust - BOW_STEP);
   else if (keys['KeyE']) boat.bowThrust = Math.min(1, boat.bowThrust + BOW_STEP);
   else boat.bowThrust *= 0.92;
 
-  if (Math.abs(boat.portThrottle) < 0.01) boat.portThrottle = 0;
-  if (Math.abs(boat.stbdThrottle) < 0.01) boat.stbdThrottle = 0;
-  if (Math.abs(boat.rudder) < 0.3) boat.rudder = 0;
   if (Math.abs(boat.bowThrust) < 0.01) boat.bowThrust = 0;
 }
 
