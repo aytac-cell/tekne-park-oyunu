@@ -185,8 +185,8 @@ const DRAG      = 0.10;  // /s doğrusal sürtünme (düşük = daha fazla atale
 const LAT_DRAG  = 6.0;   // /s yanal sürtünme (yana kayışa direnç)
 const TURN_ACC  = 0.9;   // rad/s² diferansiyel itmeden dönüş ivmesi
 const TURN_DRAG = 4.5;   // /s açısal sürtünme
-const BOW_LAT   = 3.0;   // px/s² bow thruster yanal ivme
-const BOW_TURN  = 0.4;   // rad/s² bow thruster dönüş
+const BOW_LAT   = 9.0;   // px/s² bow thruster yanal ivme
+const BOW_TURN  = 1.1;   // rad/s² bow thruster dönüş
 
 function degToRad(d) { return d * Math.PI / 180; }
 function radToDeg(r) { return r * 180 / Math.PI; }
@@ -929,6 +929,7 @@ const keys={};
 window.addEventListener('keydown',e=>{
   keys[e.code]=true;
   if(!['F5','F12'].includes(e.key)) e.preventDefault();
+  initAudio();
   // Gaz: her tuş basışında %5
   if(e.code==='KeyW') boat.portThrottle = Math.min(1, Math.round((boat.portThrottle+0.05)*100)/100);
   if(e.code==='KeyS') boat.portThrottle = Math.max(-1, Math.round((boat.portThrottle-0.05)*100)/100);
@@ -990,6 +991,108 @@ function updateDrawConfetti(dt) {
   ctx.globalAlpha = 1;
 }
 
+// ── Ses Motoru (Web Audio API) ────────────────────────────────────────────
+let audioCtx = null;
+const eng = {};  // port, stbd, bow node'ları
+
+function initAudio() {
+  if (audioCtx) return;
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+  function makeEngine(baseFreq, detune) {
+    // Ana osillatör (sawtooth = motor tınısı)
+    const osc = audioCtx.createOscillator();
+    osc.type = 'sawtooth';
+    osc.frequency.value = baseFreq;
+    osc.detune.value = detune;
+
+    // 2. harmonik (daha zengin ses)
+    const osc2 = audioCtx.createOscillator();
+    osc2.type = 'sawtooth';
+    osc2.frequency.value = baseFreq * 1.5;
+    osc2.detune.value = detune + 7;
+
+    // LFO — piston titreşimi efekti
+    const lfo = audioCtx.createOscillator();
+    const lfoGain = audioCtx.createGain();
+    lfo.frequency.value = 6;
+    lfoGain.gain.value = 4;
+    lfo.connect(lfoGain);
+    lfoGain.connect(osc.frequency);
+    lfo.start();
+
+    // Alçak geçiren filtre (motor gürültüsü)
+    const filter = audioCtx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.value = 320;
+    filter.Q.value = 1.2;
+
+    // Gain
+    const gain = audioCtx.createGain();
+    gain.gain.value = 0;
+
+    osc.connect(filter);
+    osc2.connect(filter);
+    filter.connect(gain);
+    gain.connect(audioCtx.destination);
+
+    osc.start(); osc2.start();
+    return { osc, osc2, gain, filter };
+  }
+
+  function makeBow() {
+    // Bow thruster: yüksek frekanslı elektrik motoru vınlaması
+    const osc = audioCtx.createOscillator();
+    osc.type = 'square';
+    osc.frequency.value = 220;
+
+    const filter = audioCtx.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.frequency.value = 400;
+    filter.Q.value = 2.5;
+
+    const gain = audioCtx.createGain();
+    gain.gain.value = 0;
+
+    osc.connect(filter);
+    filter.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start();
+    return { osc, gain };
+  }
+
+  eng.port = makeEngine(48, 0);
+  eng.stbd = makeEngine(51, -5);   // biraz farklı frekans = derin titreşim
+  eng.bow  = makeBow();
+}
+
+function updateAudio() {
+  if (!audioCtx) return;
+  const t = audioCtx.currentTime;
+  const smooth = 0.08;
+
+  // Port motor
+  const pAbs = Math.abs(boat.portThrottle);
+  const pIdle = 0.018;                           // rölanti sesi
+  eng.port.gain.gain.setTargetAtTime(pIdle + pAbs * 0.10, t, smooth);
+  eng.port.osc.frequency.setTargetAtTime(42 + pAbs * 90, t, smooth);
+  eng.port.osc2.frequency.setTargetAtTime(63 + pAbs * 135, t, smooth);
+  eng.port.filter.frequency.setTargetAtTime(180 + pAbs * 400, t, smooth);
+
+  // Sağ motor (biraz farklı ton)
+  const sAbs = Math.abs(boat.stbdThrottle);
+  const sIdle = 0.016;
+  eng.stbd.gain.gain.setTargetAtTime(sIdle + sAbs * 0.10, t, smooth);
+  eng.stbd.osc.frequency.setTargetAtTime(45 + sAbs * 90, t, smooth);
+  eng.stbd.osc2.frequency.setTargetAtTime(67 + sAbs * 135, t, smooth);
+  eng.stbd.filter.frequency.setTargetAtTime(180 + sAbs * 400, t, smooth);
+
+  // Bow thruster
+  const bAbs = Math.abs(boat.bowThrust);
+  eng.bow.gain.gain.setTargetAtTime(bAbs * 0.07, t, 0.04);
+  eng.bow.osc.frequency.setTargetAtTime(200 + bAbs * 160, t, 0.04);
+}
+
 // ── Main loop ─────────────────────────────────────────────────────────────
 let lastTime=0, wakeTimer=0, confettiTimer=0;
 const confettiParts = [];
@@ -1032,6 +1135,7 @@ function loop(ts) {
   drawDamageBar();
   drawMinimap();
   updateDrawConfetti(dt);
+  updateAudio();
 
   requestAnimationFrame(loop);
 }
