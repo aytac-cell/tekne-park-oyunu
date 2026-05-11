@@ -79,7 +79,7 @@
 <canvas id="minimap" width="160" height="120"></canvas>
 
 <div id="keymap">
-  Sol Motor: W/S &nbsp;|&nbsp; Sağ Motor: P/L &nbsp;|&nbsp; Dümen: A/D &nbsp;|&nbsp; Bow Thruster: Q/E &nbsp;|&nbsp; R: Yeniden Başla
+  Sol Motor: W/S &nbsp;|&nbsp; Sağ Motor: P/L &nbsp;|&nbsp; Dümen: A/D &nbsp;|&nbsp; Bow Thruster: Q/E &nbsp;|&nbsp; Zoom: ↑/↓ &nbsp;|&nbsp; R: Yeniden Başla
 </div>
 
 <div id="envPanel">
@@ -164,7 +164,7 @@ const BOAT_L = 50, BOAT_W = 14;
 const THROTTLE_STEP = 0.015, BOW_STEP = 0.02, RUDDER_STEP = 1.5, MAX_RUDDER = 35;
 // Fizik — tüm değerler px/s biriminde, kütlesiz basit model
 const ACCEL     = 7.0;   // px/s² her motor tam gazda
-const DRAG      = 0.5;   // /s doğrusal sürtünme
+const DRAG      = 0.10;  // /s doğrusal sürtünme (düşük = daha fazla atalet)
 const LAT_DRAG  = 6.0;   // /s yanal sürtünme (yana kayışa direnç)
 const TURN_ACC  = 0.9;   // rad/s² diferansiyel itmeden dönüş ivmesi
 const TURN_DRAG = 4.5;   // /s açısal sürtünme
@@ -245,6 +245,7 @@ const collRects = [
 
 // ── Camera (smooth follow) ─────────────────────────────────────────────────
 let cam = { x: 0, y: 0 };
+let zoom = 1.0;
 
 // ── Wake particles ─────────────────────────────────────────────────────────
 const wakeParticles = [];
@@ -805,20 +806,36 @@ function checkCollisions() {
   for (const rect of collRects) {
     const { hit, nx, ny } = circleRect(boat.x, boat.y, R, rect.x, rect.y, rect.w, rect.h);
     if (!hit) continue;
-    const d = Math.sqrt(nx*nx + ny*ny) || 1;
-    const nnx = nx/d, nny = ny/d;
-    // Dışarı it
-    boat.x = (Math.max(rect.x, Math.min(boat.x, rect.x+rect.w)) + nnx*(R+1));
-    boat.y = (Math.max(rect.y, Math.min(boat.y, rect.y+rect.h)) + nny*(R+1));
+    const d = Math.sqrt(nx*nx + ny*ny);
+    let nnx, nny;
+    if (d < 0.01) {
+      // Tekne dikdörtgenin içinde — en yakın kenara doğru it
+      const dLeft   = boat.x - rect.x;
+      const dRight  = rect.x + rect.w - boat.x;
+      const dTop    = boat.y - rect.y;
+      const dBottom = rect.y + rect.h - boat.y;
+      const minD = Math.min(dLeft, dRight, dTop, dBottom);
+      if      (minD === dLeft)   { boat.x = rect.x - R - 1;           nnx=-1; nny=0; }
+      else if (minD === dRight)  { boat.x = rect.x + rect.w + R + 1;  nnx= 1; nny=0; }
+      else if (minD === dTop)    { boat.y = rect.y - R - 1;           nnx=0; nny=-1; }
+      else                       { boat.y = rect.y + rect.h + R + 1;  nnx=0; nny= 1; }
+    } else {
+      nnx = nx/d; nny = ny/d;
+      // Dışarı it
+      const cx2 = Math.max(rect.x, Math.min(boat.x, rect.x+rect.w));
+      const cy2 = Math.max(rect.y, Math.min(boat.y, rect.y+rect.h));
+      boat.x = cx2 + nnx*(R+1);
+      boat.y = cy2 + nny*(R+1);
+    }
     // Darbe hızı
     const impact = Math.abs(boat.vx*nnx + boat.vy*nny);
     // Sekme
     const dot = boat.vx*nnx + boat.vy*nny;
     boat.vx = (boat.vx - 1.6*dot*nnx) * 0.35;
     boat.vy = (boat.vy - 1.6*dot*nny) * 0.35;
-    if (impact > 0.8) {
-      boat.damage = Math.min(1, boat.damage + impact * 0.05);
-      boat.flashTimer = 0.4;
+    if (impact > 0.5) {
+      boat.damage = Math.min(1, boat.damage + impact * 0.06);
+      boat.flashTimer = 0.5;
     }
   }
 
@@ -835,9 +852,9 @@ function checkCollisions() {
     const dot = boat.vx*nnx + boat.vy*nny;
     boat.vx = (boat.vx - 1.6*dot*nnx) * 0.35;
     boat.vy = (boat.vy - 1.6*dot*nny) * 0.35;
-    if (impact > 0.8) {
+    if (impact > 0.5) {
       boat.damage = Math.min(1, boat.damage + impact * 0.06);
-      boat.flashTimer = 0.4;
+      boat.flashTimer = 0.5;
     }
   }
 
@@ -892,6 +909,9 @@ window.addEventListener('keydown',e=>{
   if(e.code==='KeyS') boat.portThrottle = Math.max(-1, Math.round((boat.portThrottle-0.05)*100)/100);
   if(e.code==='KeyP') boat.stbdThrottle = Math.min(1, Math.round((boat.stbdThrottle+0.05)*100)/100);
   if(e.code==='KeyL') boat.stbdThrottle = Math.max(-1, Math.round((boat.stbdThrottle-0.05)*100)/100);
+  // Zoom: ok tuşları
+  if(e.code==='ArrowUp')   zoom = Math.min(2.5, zoom * 1.15);
+  if(e.code==='ArrowDown') zoom = Math.max(0.3, zoom / 1.15);
 });
 window.addEventListener('keyup',e=>{keys[e.code]=false;});
 window.addEventListener('keydown',e=>{if(e.code==='KeyR') resetGame();});
@@ -926,10 +946,19 @@ function loop(ts) {
   updateCamera(dt);
 
   ctx.clearRect(0,0,canvas.width,canvas.height);
+
+  // Dünya çizimi — zoom uygulanır (canvas merkezi etrafında)
+  ctx.save();
+  ctx.translate(canvas.width/2, canvas.height/2);
+  ctx.scale(zoom, zoom);
+  ctx.translate(-canvas.width/2, -canvas.height/2);
   drawWater();
   drawWake();
   drawMarina();
   drawPlayerBoat();
+  ctx.restore();
+
+  // HUD çizimi — zoom uygulanmaz
   drawTargetArrow();
 
   // Compass arrows (fixed screen position)
